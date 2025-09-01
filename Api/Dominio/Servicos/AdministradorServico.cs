@@ -1,46 +1,85 @@
 using MinimalApi.Dominio.Entidades;
 using MinimalApi.DTOs;
-using MinimalApi.Infraestrutura.Db;
 using MinimalApi.Dominio.Interfaces;
+using MinimalApi.Infraestrutura.Repositories;
 
 namespace MinimalApi.Dominio.Servicos;
 
 public class AdministradorServico : IAdministradorServico
 {
-    private readonly DbContexto _contexto;
-    public AdministradorServico(DbContexto contexto)
+    private readonly IAdministradorRepository _repository;
+    private readonly ISenhaServico _senhaServico;
+
+    public AdministradorServico(IAdministradorRepository repository, ISenhaServico senhaServico)
     {
-        _contexto = contexto;
+        _repository = repository;
+        _senhaServico = senhaServico;
     }
 
-    public Administrador? BuscaPorId(int id)
+    public async Task<Administrador?> BuscaPorId(int id)
     {
-        return _contexto.Administradores.Where(v => v.Id == id).FirstOrDefault();
+        try
+        {
+            return await _repository.GetByIdAsync(id);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
-    public Administrador Incluir(Administrador administrador)
+    public async Task<Administrador> Incluir(Administrador administrador)
     {
-        _contexto.Administradores.Add(administrador);
-        _contexto.SaveChanges();
-
-        return administrador;
+        try
+        {
+            // Hash da senha antes de salvar
+            administrador.Senha = _senhaServico.HashSenha(administrador.Senha);
+            
+            return await _repository.AddAsync(administrador);
+        }
+        catch
+        {
+            throw new InvalidOperationException("Erro ao incluir administrador");
+        }
     }
 
-    public Administrador? Login(LoginDTO loginDTO)
+    public async Task<Administrador?> Login(LoginDTO loginDTO)
     {
-        var adm = _contexto.Administradores.Where(a => a.Email == loginDTO.Email && a.Senha == loginDTO.Senha).FirstOrDefault();
-        return adm;
+        try
+        {
+            var administrador = await _repository.GetByEmailAsync(loginDTO.Email);
+            
+            if (administrador == null)
+                return null;
+
+            // Verifica se a senha está correta usando hash
+            if (_senhaServico.VerificarSenha(loginDTO.Senha, administrador.Senha))
+                return administrador;
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
-    public List<Administrador> Todos(int? pagina)
+    public async Task<List<Administrador>> Todos(int? pagina)
     {
-        var query = _contexto.Administradores.AsQueryable();
-
-        int itensPorPagina = 10;
-
-        if(pagina != null)
-            query = query.Skip(((int)pagina - 1) * itensPorPagina).Take(itensPorPagina);
-
-        return query.ToList();
+        try
+        {
+            if (pagina.HasValue && pagina > 0)
+            {
+                var administradores = await _repository.GetPagedAsync(pagina.Value, 10);
+                return administradores.ToList();
+            }
+            
+            var todos = await _repository.GetAllAsync();
+            return todos.ToList();
+        }
+        catch
+        {
+            return new List<Administrador>();
+        }
     }
 }

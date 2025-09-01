@@ -1,55 +1,101 @@
 using MinimalApi.Dominio.Entidades;
-using MinimalApi.DTOs;
-using MinimalApi.Infraestrutura.Db;
+using MinimalApi.Dominio.DTOs;
 using MinimalApi.Dominio.Interfaces;
-using Microsoft.EntityFrameworkCore;
+using MinimalApi.Dominio.ModelViews;
+using MinimalApi.Infraestrutura.Repositories;
 
 namespace MinimalApi.Dominio.Servicos;
 
 public class VeiculoServico : IVeiculoServico
 {
-    private readonly DbContexto _contexto;
-    public VeiculoServico(DbContexto contexto)
+    private readonly IVeiculoRepository _repository;
+
+    public VeiculoServico(IVeiculoRepository repository)
     {
-        _contexto = contexto;
+        _repository = repository;
     }
 
-    public void Apagar(Veiculo veiculo)
+    public async Task Apagar(Veiculo veiculo)
     {
-        _contexto.Veiculos.Remove(veiculo);
-        _contexto.SaveChanges();
+        await _repository.DeleteAsync(veiculo);
     }
 
-    public void Atualizar(Veiculo veiculo)
+    public async Task Atualizar(Veiculo veiculo)
     {
-        _contexto.Veiculos.Update(veiculo);
-        _contexto.SaveChanges();
+        await _repository.UpdateAsync(veiculo);
     }
 
-    public Veiculo? BuscaPorId(int id)
+    public async Task<Veiculo?> BuscaPorId(int id)
     {
-        return _contexto.Veiculos.Where(v => v.Id == id).FirstOrDefault();
+        return await _repository.GetByIdAsync(id);
     }
 
-    public void Incluir(Veiculo veiculo)
+    public async Task Incluir(Veiculo veiculo)
     {
-        _contexto.Veiculos.Add(veiculo);
-        _contexto.SaveChanges();
+        await _repository.AddAsync(veiculo);
     }
 
-    public List<Veiculo> Todos(int? pagina = 1, string? nome = null, string? marca = null)
+    public async Task<List<Veiculo>> Todos(int? pagina = 1, string? nome = null, string? marca = null)
     {
-        var query = _contexto.Veiculos.AsQueryable();
-        if(!string.IsNullOrEmpty(nome))
+        try
         {
-            query = query.Where(v => EF.Functions.Like(v.Nome.ToLower(), $"%{nome}%"));
+            // Se há filtros, use o método filtrado
+            if (!string.IsNullOrEmpty(nome) || !string.IsNullOrEmpty(marca))
+            {
+                var veiculos = await _repository.GetFilteredAsync(nome, marca, null);
+                return veiculos.ToList();
+            }
+
+            // Caso contrário, use paginação
+            if (pagina.HasValue && pagina > 0)
+            {
+                var veiculos = await _repository.GetPagedAsync(pagina.Value, 10);
+                return veiculos.ToList();
+            }
+
+            var todos = await _repository.GetAllAsync();
+            return todos.ToList();
         }
+        catch
+        {
+            return new List<Veiculo>();
+        }
+    }
 
-        int itensPorPagina = 10;
+    public async Task<PaginatedResult<Veiculo>> TodosComFiltrosAvancados(VeiculoFiltroDTO filtro)
+    {
+        try
+        {
+            return await _repository.GetPaginatedWithFiltersAsync(filtro);
+        }
+        catch
+        {
+            return new PaginatedResult<Veiculo>
+            {
+                Data = new List<Veiculo>(),
+                Metadata = new PaginationMetadata
+                {
+                    CurrentPage = filtro.Pagina ?? 1,
+                    TotalPages = 0,
+                    PageSize = filtro.TamanhoPagina ?? 10,
+                    TotalCount = 0
+                }
+            };
+        }
+    }
 
-        if(pagina != null)
-            query = query.Skip(((int)pagina - 1) * itensPorPagina).Take(itensPorPagina);
+    public async Task<IEnumerable<Veiculo>> BuscarPorMarca(string marca)
+    {
+        return await _repository.GetByMarcaAsync(marca);
+    }
 
-        return query.ToList();
+    public async Task<IEnumerable<Veiculo>> BuscarPorAno(int ano)
+    {
+        return await _repository.GetByAnoAsync(ano);
+    }
+
+    public async Task<IEnumerable<Veiculo>> BuscarPorNome(string nome)
+    {
+        return await _repository.GetByNomeAsync(nome);
     }
 }
